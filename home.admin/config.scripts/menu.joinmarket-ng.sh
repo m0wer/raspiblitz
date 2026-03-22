@@ -79,7 +79,7 @@ prompt_param() {
     local value
     value=$(whiptail --title " $title " \
       --inputbox "$prompt" \
-      10 68 "$default" 3>&1 1>&2 2>&3)
+      16 68 "$default" 3>&1 1>&2 2>&3)
     local rc=$?
     [ $rc -ne 0 ] && return 1
     echo "$value"
@@ -127,10 +127,27 @@ show_summary() {
         fi
     done
 
-    body="${body}\n>> = changed from default\n\nProceed?"
+    body="${body}\n>> = changed from default\n\nProceed with these values?"
 
     whiptail --title " $title " --yesno "$body" 20 70 3>&1 1>&2 2>&3
     return $?
+}
+
+# Helper: Display send/coinjoin status summary
+# Usage: display_send_status "Optional explanation text"
+display_send_status() {
+    local explanation="${1:-}"
+    
+    cat <<EOF
+From wallet:    $(basename "$CURRENT_WALLET")
+Mixdepth:       ${SEND_MIXDEPTH:-not set}
+Amount:         ${SEND_AMOUNT:-not set} (sats)
+Counterparties: ${SEND_CP:-$DEFAULT_COUNTERPARTIES} (makers)
+Fee:            ${SEND_FEE:-auto} (sats/vB)
+Destination:    ${SEND_DEST:-not set}
+----------------------------------------------------------------
+${explanation}
+EOF
 }
 
 # Main Loop
@@ -175,34 +192,35 @@ while true; do
           continue
       fi
 
-      # 1. Destination address (required)
-      SEND_DEST=$(prompt_param "Destination" \
-        "Enter destination bitcoin address.\nLeave empty and press Enter for INTERNAL (next mixdepth, coinjoin only)." \
-        "$DEFAULT_DESTINATION") || continue
+# 1. Source mixdepth
+SEND_MIXDEPTH=$(prompt_param "Choose a mixdepth to send from" \
+  "$(display_send_status "Source mixdepth (account) to send from:")" \
+  "$DEFAULT_MIXDEPTH") || continue
+SEND_MIXDEPTH=$(to_int "${SEND_MIXDEPTH}" "$DEFAULT_MIXDEPTH")
+
+# 2. Amount in satoshis
+SEND_AMOUNT=$(prompt_param "Send Amount" \
+  "$(display_send_status "Amount in satoshis to send.\n0 = sweep entire mixdepth (best privacy for coinjoin).")" \
+  "$DEFAULT_AMOUNT") || continue
+SEND_AMOUNT=$(to_int "${SEND_AMOUNT}" "$DEFAULT_AMOUNT")
+
+# 3. Counterparties
+SEND_CP=$(prompt_param "Counterparties" \
+  "$(display_send_status "Number of counterparties (makers) for CoinJoin.\n0 = normal transaction (no CoinJoin).\nRecommended for CoinJoin: 4-10.")" \
+  "$DEFAULT_COUNTERPARTIES") || continue
+SEND_CP=$(to_int "${SEND_CP}" "$DEFAULT_COUNTERPARTIES")
+
+# 4. Fee rate
+SEND_FEE=$(prompt_param "Fee Rate" \
+  "$(display_send_status "Fee rate in sat/vB.\nLeave blank for automatic estimation. (3-block target from config).")" \
+  "$DEFAULT_FEE_RATE") || continue
+
+# 5. Destination address
+SEND_DEST=$(prompt_param "Destination Address" \
+  "$(display_send_status "Enter destination bitcoin address.\nLeave empty and press Enter for INTERNAL (next mixdepth, coinjoin only).")" \
+  "$DEFAULT_DESTINATION") || continue
+  
       # For coinjoin with no destination, default to INTERNAL later
-
-      # 2. Amount in satoshis
-      SEND_AMOUNT=$(prompt_param "Amount" \
-        "Amount in satoshis to send.\n0 = sweep entire mixdepth (best privacy for coinjoin)." \
-        "$DEFAULT_AMOUNT") || continue
-      SEND_AMOUNT=$(to_int "${SEND_AMOUNT}" "$DEFAULT_AMOUNT")
-
-      # 3. Source mixdepth
-      SEND_MIXDEPTH=$(prompt_param "Source Mixdepth" \
-        "Source mixdepth (account) to send from." \
-        "$DEFAULT_MIXDEPTH") || continue
-      SEND_MIXDEPTH=$(to_int "${SEND_MIXDEPTH}" "$DEFAULT_MIXDEPTH")
-
-      # 4. Fee rate
-      SEND_FEE=$(prompt_param "Fee Rate" \
-        "Fee rate in sat/vB.\nLeave blank for automatic estimation (3-block target from config)." \
-        "$DEFAULT_FEE_RATE") || continue
-
-      # 5. Number of counterparties (0 = normal transaction, >0 = coinjoin)
-      SEND_CP=$(prompt_param "Counterparties" \
-        "Number of counterparties (makers) for CoinJoin.\n0 = normal transaction (no CoinJoin).\nRecommended for CoinJoin: 4-10." \
-        "$DEFAULT_COUNTERPARTIES") || continue
-      SEND_CP=$(to_int "${SEND_CP}" "$DEFAULT_COUNTERPARTIES")
 
       # Apply INTERNAL default for coinjoin when destination is empty
       if [ -z "$SEND_DEST" ] && [ "$SEND_CP" -gt 0 ] 2>/dev/null; then
@@ -274,6 +292,7 @@ while true; do
       pause
       ;;
 
+    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
     # WALLET MANAGEMENT
     # ------------------------------------------------------------------
