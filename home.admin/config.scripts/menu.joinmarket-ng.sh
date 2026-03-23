@@ -133,17 +133,28 @@ show_summary() {
     return $?
 }
 
-# Helper: Display send/coinjoin status summary
+# Helper: Display send/coinjoin status summary with defaults
 # Usage: display_send_status "Optional explanation text"
 display_send_status() {
     local explanation="${1:-}"
     
+    # Fee display logic based on SEND_FEE_ENTERED flag
+    local fee_display
+    if [ -n "$SEND_FEE" ]; then
+        fee_display="$SEND_FEE"
+    elif [ "$SEND_FEE_ENTERED" = "1" ]; then
+        fee_display="auto"
+    else
+        fee_display="(default: auto)"
+    fi
+    
     cat <<EOF
+	
 From wallet:    $(basename "$CURRENT_WALLET")
-Mixdepth:       ${SEND_MIXDEPTH:-not set}
-Amount:         ${SEND_AMOUNT:-not set} (sats)
-Counterparties: ${SEND_CP:-$DEFAULT_COUNTERPARTIES} (makers)
-Fee:            ${SEND_FEE:-auto} (sats/vB)
+Mixdepth:       ${SEND_MIXDEPTH:-(default: ${DEFAULT_MIXDEPTH})}
+Amount:         ${SEND_AMOUNT:-(default: ${DEFAULT_AMOUNT})} sats
+Counterparties: ${SEND_CP:-(default: ${DEFAULT_COUNTERPARTIES})} makers
+Fee:            ${fee_display} sats/vB
 Destination:    ${SEND_DEST:-not set}
 ----------------------------------------------------------------
 ${explanation}
@@ -192,33 +203,44 @@ while true; do
           continue
       fi
 
-# 1. Source mixdepth
-SEND_MIXDEPTH=$(prompt_param "Choose a mixdepth to send from" \
-  "$(display_send_status "Source mixdepth (account) to send from:")" \
-  "$DEFAULT_MIXDEPTH") || continue
-SEND_MIXDEPTH=$(to_int "${SEND_MIXDEPTH}" "$DEFAULT_MIXDEPTH")
+      # Reset all send parameters at the start
+      SEND_MIXDEPTH=""
+      SEND_AMOUNT=""
+      SEND_CP=""
+      SEND_FEE=""
+      SEND_FEE_ENTERED=""  # Flag to track if Fee prompt was shown
+      SEND_DEST=""
 
-# 2. Amount in satoshis
-SEND_AMOUNT=$(prompt_param "Send Amount" \
-  "$(display_send_status "Amount in satoshis to send.\n0 = sweep entire mixdepth (best privacy for coinjoin).")" \
-  "$DEFAULT_AMOUNT") || continue
-SEND_AMOUNT=$(to_int "${SEND_AMOUNT}" "$DEFAULT_AMOUNT")
+      # 1. Source mixdepth (numeric validation required)
+      SEND_MIXDEPTH=$(prompt_param "Choose a mixdepth to send from" \
+        "$(display_send_status "Source mixdepth (account) to send from.")" \
+        "") || continue
+      SEND_MIXDEPTH=$(to_int "${SEND_MIXDEPTH:-$DEFAULT_MIXDEPTH}" "$DEFAULT_MIXDEPTH")
 
-# 3. Counterparties
-SEND_CP=$(prompt_param "Counterparties" \
-  "$(display_send_status "Number of counterparties (makers) for CoinJoin.\n0 = normal transaction (no CoinJoin).\nRecommended for CoinJoin: 4-10.")" \
-  "$DEFAULT_COUNTERPARTIES") || continue
-SEND_CP=$(to_int "${SEND_CP}" "$DEFAULT_COUNTERPARTIES")
+      # 2. Amount in satoshis (numeric validation required)
+      SEND_AMOUNT=$(prompt_param "Send Amount" \
+        "$(display_send_status "Amount in satoshis to send.\n0 = sweep entire mixdepth (best privacy for coinjoin).")" \
+        "") || continue
+      SEND_AMOUNT=$(to_int "${SEND_AMOUNT:-$DEFAULT_AMOUNT}" "$DEFAULT_AMOUNT")
 
-# 4. Fee rate
-SEND_FEE=$(prompt_param "Fee Rate" \
-  "$(display_send_status "Fee rate in sat/vB.\nLeave blank for automatic estimation. (3-block target from config).")" \
-  "$DEFAULT_FEE_RATE") || continue
+      # 3. Counterparties (numeric validation required)
+      SEND_CP=$(prompt_param "Counterparties" \
+        "$(display_send_status "Number of counterparties (makers) for CoinJoin.\n0 = normal transaction (no CoinJoin).\nRecommended for CoinJoin: 4-10.")" \
+        "") || continue
+      SEND_CP=$(to_int "${SEND_CP:-$DEFAULT_COUNTERPARTIES}" "$DEFAULT_COUNTERPARTIES")
 
-# 5. Destination address
-SEND_DEST=$(prompt_param "Destination Address" \
-  "$(display_send_status "Enter destination bitcoin address.\nLeave empty and press Enter for INTERNAL (next mixdepth, coinjoin only).")" \
-  "$DEFAULT_DESTINATION") || continue
+      # 4. Fee rate - no to_int! (allows empty string for "auto")
+      SEND_FEE=$(prompt_param "Fee Rate" \
+        "$(display_send_status "Fee rate in sat/vB.\nLeave blank for automatic estimation.")" \
+        "") || continue
+
+      # Set flag to show "auto" instead of "(default: auto)" in next prompts
+      SEND_FEE_ENTERED="1"
+
+      # 5. Destination address - no to_int! (must remain string)
+      SEND_DEST=$(prompt_param "Destination Address" \
+        "$(display_send_status "Enter destination bitcoin address.\nLeave empty for INTERNAL (next mixdepth, coinjoin only).")" \
+        "") || continue
   
       # For coinjoin with no destination, default to INTERNAL later
 
